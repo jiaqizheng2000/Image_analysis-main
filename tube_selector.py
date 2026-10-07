@@ -10,7 +10,6 @@ import base64
 import math
 import tkinter as tk
 from dataclasses import dataclass, replace
-from tkinter import ttk
 
 import cv2
 import numpy as np
@@ -18,13 +17,10 @@ import numpy as np
 from tube_analysis import Box, TubeInfo, format_height
 
 
-class SelectionCancelled(Exception):
-    """The user closed or cancelled the selector."""
-
-
 @dataclass(frozen=True)
 class Region:
     """Immutable canvas geometry with optional physical tube metadata."""
+
     kind: str
     box: Box
     tube_number: int | None = None
@@ -33,15 +29,21 @@ class Region:
     use_default_name: bool | None = None
 
     def tube_info(self, fallback_number: int = 1) -> TubeInfo:
-        """Translate canvas metadata into the shared tube model, including old regions."""
+        """Convert canvas metadata to a tube identity, supplying missing old IDs."""
         if self.kind != "tube":
             raise ValueError("Only tube regions have tube identities.")
-        return TubeInfo(self.tube_number or fallback_number, self.tube_name, self.enabled, self.use_default_name)
+        return TubeInfo(
+            self.tube_number or fallback_number,
+            self.tube_name,
+            self.enabled,
+            self.use_default_name,
+        )
 
 
 @dataclass
 class ViewTransform:
     """Map between original image coordinates and the zoomed/panned canvas."""
+
     scale: float = 1.0
     offset_x: float = 0.0
     offset_y: float = 0.0
@@ -64,6 +66,7 @@ class ViewTransform:
 
 class ImageCanvas(tk.Canvas):
     """Native Tk selection canvas with live overlays, zoom, pan and undoable edits."""
+
     def __init__(self, master, on_box=None, on_change=None, **kwargs):
         """Initialize canvas state and bind native pointer and keyboard gestures."""
         super().__init__(master, background="#20282d", highlightthickness=0, **kwargs)
@@ -85,12 +88,10 @@ class ImageCanvas(tk.Canvas):
         self.bind("<ButtonPress-1>", self._press)
         self.bind("<B1-Motion>", self._motion)
         self.bind("<ButtonRelease-1>", self._release)
-        self.bind("<ButtonPress-2>", self._pan_press)
-        self.bind("<B2-Motion>", self._motion)
-        self.bind("<ButtonRelease-2>", self._release)
-        self.bind("<ButtonPress-3>", self._pan_press)
-        self.bind("<B3-Motion>", self._motion)
-        self.bind("<ButtonRelease-3>", self._release)
+        for button in (2, 3):
+            self.bind(f"<ButtonPress-{button}>", self._pan_press)
+            self.bind(f"<B{button}-Motion>", self._motion)
+            self.bind(f"<ButtonRelease-{button}>", self._release)
         self.bind("<MouseWheel>", self._wheel)
         self.bind("<Button-4>", lambda e: self.zoom(1.12, e.x, e.y))
         self.bind("<Button-5>", lambda e: self.zoom(1 / 1.12, e.x, e.y))
@@ -121,21 +122,27 @@ class ImageCanvas(tk.Canvas):
         if self.locked:
             return
         if remember and regions != self.regions:
-            self.history.append(self.regions.copy())
-            self.history = self.history[-100:]
+            self._remember(self.regions)
         self.regions = list(regions)
         self.selected = None
         self._changed()
 
+    def _remember(self, regions: list[Region]) -> None:
+        """Store a complete region snapshot and retain at most 100 undo entries."""
+        self.history.append(regions.copy())
+        self.history = self.history[-100:]
+
     def _changed(self):
-        """Invalidate old measurements, redraw regions and notify the owner of an edit."""
+        """Clear old measurements, redraw regions and notify the owner of an edit."""
         self.preview = []
         self._draw_regions()
         if self.on_change:
             self.on_change()
 
     def show_measurements(self, measurements):
-        """Replace only measurement overlays, leaving the source image and history intact."""
+        """Replace only measurement overlays, leaving the source image and history
+        intact.
+        """
         self.preview = list(measurements)
         self._draw_regions()
 
@@ -149,7 +156,9 @@ class ImageCanvas(tk.Canvas):
     def delete_selected(self):
         """Remove the current region through the shared undoable state update."""
         if not self.locked and self.selected is not None:
-            self.set_regions([r for i, r in enumerate(self.regions) if i != self.selected])
+            self.set_regions(
+                [r for i, r in enumerate(self.regions) if i != self.selected]
+            )
 
     def select(self, index):
         """Select a region and activate move/resize editing."""
@@ -165,7 +174,9 @@ class ImageCanvas(tk.Canvas):
         iw, ih = self.image_size
         scale = min((w - 20) / iw, (h - 20) / ih)
         scale = max(0.001, scale)
-        self.transform = ViewTransform(scale, (w - iw * scale) / 2, (h - ih * scale) / 2)
+        self.transform = ViewTransform(
+            scale, (w - iw * scale) / 2, (h - ih * scale) / 2
+        )
         self._render()
 
     def zoom(self, factor, x=None, y=None):
@@ -173,9 +184,16 @@ class ImageCanvas(tk.Canvas):
         if self.image is None:
             return
         scale = self.transform.scale
-        fit_scale = min(self.winfo_width() / self.image_size[0], self.winfo_height() / self.image_size[1])
+        fit_scale = min(
+            self.winfo_width() / self.image_size[0],
+            self.winfo_height() / self.image_size[1],
+        )
         target = max(fit_scale * 0.25, min(4.0, scale * factor))
-        self.transform.zoom(target / scale, self.winfo_width() / 2 if x is None else x, self.winfo_height() / 2 if y is None else y)
+        self.transform.zoom(
+            target / scale,
+            self.winfo_width() / 2 if x is None else x,
+            self.winfo_height() / 2 if y is None else y,
+        )
         self._render()
 
     def _wheel(self, event):
@@ -195,13 +213,21 @@ class ImageCanvas(tk.Canvas):
         self.fit()
 
     def _render(self):
-        """Render only the visible image viewport and redraw vector overlays above it."""
+        """Render the visible image viewport and redraw vector overlays above it."""
         if self.image is None:
             return
         t = self.transform
-        matrix = np.array([[t.scale, 0, t.offset_x], [0, t.scale, t.offset_y]], dtype=np.float64)
+        matrix = np.array(
+            [[t.scale, 0, t.offset_x], [0, t.scale, t.offset_y]], dtype=np.float64
+        )
         # Render only the visible viewport, even when zoomed into a 20 MP photo.
-        viewport = cv2.warpAffine(self.image, matrix, (max(1, self.winfo_width()), max(1, self.winfo_height())), flags=cv2.INTER_LINEAR, borderValue=(45, 40, 32))
+        viewport = cv2.warpAffine(
+            self.image,
+            matrix,
+            (max(1, self.winfo_width()), max(1, self.winfo_height())),
+            flags=cv2.INTER_LINEAR,
+            borderValue=(45, 40, 32),
+        )
         encoded = cv2.imencode(".png", viewport)[1]
         self._photo = tk.PhotoImage(master=self, data=base64.b64encode(encoded))
         self.delete("raster")
@@ -233,20 +259,54 @@ class ImageCanvas(tk.Canvas):
                     if measurement.status != "ok":
                         color = "#ffbb55"
                     if measurement.detection.box:
-                        for y in (measurement.detection.box.y1, measurement.detection.box.y2 - 1):
+                        for y in (
+                            measurement.detection.box.y1,
+                            measurement.detection.box.y2 - 1,
+                        ):
                             _, cy = self.transform.to_canvas(0, y)
-                            self.create_line(x1, cy, x2, cy, fill="#ffe36b", width=3, tags="region")
-            self.create_rectangle(x1, y1, x2, y2, outline=color, width=3 if i == self.selected else 2, dash=() if region.enabled else (4, 4), tags="region")
+                            self.create_line(
+                                x1, cy, x2, cy, fill="#ffe36b", width=3, tags="region"
+                            )
+            self.create_rectangle(
+                x1,
+                y1,
+                x2,
+                y2,
+                outline=color,
+                width=3 if i == self.selected else 2,
+                dash=() if region.enabled else (4, 4),
+                tags="region",
+            )
             label_y = max(2, y1 - 21)
-            text = self.create_text(x1 + 2, label_y, text=label, anchor="nw", fill=color, font=("TkDefaultFont", 11, "bold"), tags="region")
-            background = self.create_rectangle(*self.bbox(text), fill="#20282d", outline="", tags="region")
+            text = self.create_text(
+                x1 + 2,
+                label_y,
+                text=label,
+                anchor="nw",
+                fill=color,
+                font=("TkDefaultFont", 11, "bold"),
+                tags="region",
+            )
+            background = self.create_rectangle(
+                *self.bbox(text), fill="#20282d", outline="", tags="region"
+            )
             self.tag_lower(background, text)
             if i == self.selected:
                 for x, y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
-                    self.create_rectangle(x - 5, y - 5, x + 5, y + 5, fill=color, outline="#20282d", tags="region")
+                    self.create_rectangle(
+                        x - 5,
+                        y - 5,
+                        x + 5,
+                        y + 5,
+                        fill=color,
+                        outline="#20282d",
+                        tags="region",
+                    )
 
     def _point(self, event):
-        """Translate a pointer event into image coordinates clamped to the source bounds."""
+        """Translate a pointer event into image coordinates clamped to the source
+        bounds.
+        """
         x, y = self.transform.to_image(event.x, event.y)
         width, height = self.image_size
         return max(0, min(width, x)), max(0, min(height, y))
@@ -255,7 +315,13 @@ class ImageCanvas(tk.Canvas):
         """Remember the starting pointer and offsets for a viewport pan gesture."""
         if self.image is not None:
             self.focus_set()
-            self._gesture = ("pan", event.x, event.y, self.transform.offset_x, self.transform.offset_y)
+            self._gesture = (
+                "pan",
+                event.x,
+                event.y,
+                self.transform.offset_x,
+                self.transform.offset_y,
+            )
 
     def _press(self, event):
         """Begin drawing, moving, resizing or panning from a native pointer event."""
@@ -269,12 +335,25 @@ class ImageCanvas(tk.Canvas):
             # The selected region's corner handles take precedence over overlaps.
             if self.selected is not None:
                 box = self.regions[self.selected].box
-                for x, y, opposite in ((box.x1, box.y1, (box.x2, box.y2)), (box.x2, box.y1, (box.x1, box.y2)), (box.x1, box.y2, (box.x2, box.y1)), (box.x2, box.y2, (box.x1, box.y1))):
+                for x, y, opposite in (
+                    (box.x1, box.y1, (box.x2, box.y2)),
+                    (box.x2, box.y1, (box.x1, box.y2)),
+                    (box.x1, box.y2, (box.x2, box.y1)),
+                    (box.x2, box.y2, (box.x1, box.y1)),
+                ):
                     cx, cy = self.transform.to_canvas(x, y)
                     if math.hypot(cx - event.x, cy - event.y) <= 10:
                         self._gesture = ("resize", opposite, self.regions.copy())
                         return
-            self.selected = next((i for i in reversed(range(len(self.regions))) if self.regions[i].box.x1 <= point[0] <= self.regions[i].box.x2 and self.regions[i].box.y1 <= point[1] <= self.regions[i].box.y2), None)
+            self.selected = next(
+                (
+                    i
+                    for i in reversed(range(len(self.regions)))
+                    if self.regions[i].box.x1 <= point[0] <= self.regions[i].box.x2
+                    and self.regions[i].box.y1 <= point[1] <= self.regions[i].box.y2
+                ),
+                None,
+            )
             if self.selected is not None:
                 self._gesture = ("move", point, self.regions.copy())
             self._draw_regions()
@@ -297,7 +376,9 @@ class ImageCanvas(tk.Canvas):
             self.delete("draft")
             a = self.transform.to_canvas(*args[0])
             b = self.transform.to_canvas(*point)
-            self.create_rectangle(*a, *b, outline="#ffffff", width=2, dash=(5, 3), tags="draft")
+            self.create_rectangle(
+                *a, *b, outline="#ffffff", width=2, dash=(5, 3), tags="draft"
+            )
         elif kind in ("resize", "move"):
             start, before = args
             original = before[self.selected]
@@ -306,8 +387,18 @@ class ImageCanvas(tk.Canvas):
                     box = Box.from_points(start, point, self.image_size)
                 else:
                     box = original.box
-                    dx = round(max(-box.x1, min(self.image_size[0] - box.x2, point[0] - start[0])))
-                    dy = round(max(-box.y1, min(self.image_size[1] - box.y2, point[1] - start[1])))
+                    dx = round(
+                        max(
+                            -box.x1,
+                            min(self.image_size[0] - box.x2, point[0] - start[0]),
+                        )
+                    )
+                    dy = round(
+                        max(
+                            -box.y1,
+                            min(self.image_size[1] - box.y2, point[1] - start[1]),
+                        )
+                    )
                     box = Box(box.x1 + dx, box.y1 + dy, box.x2 + dx, box.y2 + dy)
                 self.regions[self.selected] = replace(original, box=box)
                 self.preview = []
@@ -331,7 +422,7 @@ class ImageCanvas(tk.Canvas):
             if box.width >= 3 and box.height >= 3 and self.on_box:
                 self.on_box(box)
         elif kind in ("resize", "move") and self.regions != args[1]:
-            self.history.append(args[1])
+            self._remember(args[1])
             self._changed()
 
     def _cancel_gesture(self, event=None):
@@ -341,105 +432,3 @@ class ImageCanvas(tk.Canvas):
         self._gesture = None
         self.delete("draft")
         self._draw_regions()
-
-
-def select_rectangles(image, title="Select regions", labels=None):
-    """Blocking compatibility dialog, returning normalized full resolution boxes.
-
-    Drag in either direction. Undo and clear keep saved coordinates synchronized.
-    Closing the window raises SelectionCancelled instead of exiting Python.
-    """
-    root = tk.Tk()
-    root.title(title)
-    root.geometry("1150x800")
-    result = None
-    text = tk.StringVar(root)
-    def update():
-        """Show the next requested region and the current selection count."""
-        count = len(canvas.regions)
-        next_label = labels[count] if labels and count < len(labels) else "next region"
-        text.set(f"Drag around {next_label}.   {count} selected.   Scroll: zoom · Space + drag: pan")
-    def add(box):
-        """Append a drawn region unless the requested selection count is complete."""
-        if not labels or len(canvas.regions) < len(labels):
-            canvas.set_regions(canvas.regions + [Region("tube", box)])
-    ttk.Label(root, textvariable=text, padding=10).pack(fill="x")
-    canvas = ImageCanvas(root, on_box=add, on_change=update)
-    canvas.pack(fill="both", expand=True)
-    bar = ttk.Frame(root, padding=10)
-    bar.pack(fill="x")
-    def accept():
-        """Accept only a nonempty selection with every requested label supplied."""
-        nonlocal result
-        if canvas.regions and (not labels or len(canvas.regions) == len(labels)):
-            result = [r.box for r in canvas.regions]
-            root.destroy()
-    for label, command in (("Undo", canvas.undo), ("Clear", lambda: canvas.set_regions([])), ("Fit", canvas.fit), ("Cancel", root.destroy), ("Use selection", accept)):
-        ttk.Button(bar, text=label, command=command).pack(side="left", padx=5)
-    root.bind("<Return>", lambda e: accept())
-    root.bind("<Escape>", lambda e: root.destroy())
-    canvas.set_image(image)
-    update()
-    root.mainloop()
-    if result is None:
-        raise SelectionCancelled()
-    return result
-
-
-def select_polygon(image, title="Select polygon", max_points=-1):
-    """Small compatibility selector for the original optional polygon helper."""
-    class PolygonCanvas(ImageCanvas):
-        """Reuse viewport navigation while collecting ordered polygon vertices."""
-        def __init__(self, *args, **kwargs):
-            """Initialize the vertex list before the base canvas draws any overlays."""
-            self.points = []
-            super().__init__(*args, **kwargs)
-
-        def _draw_regions(self):
-            """Draw connected vertices in the shared image-to-canvas coordinate system."""
-            super()._draw_regions()
-            coordinates = [self.transform.to_canvas(*p) for p in self.points]
-            if len(coordinates) >= 2:
-                self.create_line(*[v for p in coordinates for v in p], fill="#66e0a3", width=2, tags="region")
-            for i, (x, y) in enumerate(coordinates):
-                self.create_oval(x - 4, y - 4, x + 4, y + 4, fill="#66e0a3", tags="region")
-                self.create_text(x + 7, y, text=str(i + 1), fill="white", anchor="w", tags="region")
-
-        def _press(self, event):
-            """Add an original-image vertex or begin panning when Space is held."""
-            self.focus_set()
-            if self._space:
-                return self._pan_press(event)
-            if max_points <= 0 or len(self.points) < max_points:
-                self.points.append(tuple(round(v) for v in self._point(event)))
-                self._draw_regions()
-
-    root = tk.Tk()
-    root.title(title)
-    root.geometry("1150x800")
-    result = None
-    ttk.Label(root, text="Click polygon vertices · Scroll: zoom · Space + drag: pan · Enter: accept · Escape: cancel", padding=10).pack(fill="x")
-    canvas = PolygonCanvas(root)
-    canvas.pack(fill="both", expand=True)
-    def undo():
-        """Remove the last polygon vertex and redraw the remaining path."""
-        if canvas.points:
-            canvas.points.pop()
-            canvas._draw_regions()
-    def accept():
-        """Accept a polygon only after at least three vertices have been selected."""
-        nonlocal result
-        if len(canvas.points) >= 3:
-            result = canvas.points.copy()
-            root.destroy()
-    bar = ttk.Frame(root, padding=10)
-    bar.pack(fill="x")
-    ttk.Button(bar, text="Undo vertex", command=undo).pack(side="left")
-    ttk.Button(bar, text="Use polygon", command=accept).pack(side="left", padx=8)
-    root.bind("<Return>", lambda e: accept())
-    root.bind("<Escape>", lambda e: root.destroy())
-    canvas.set_image(image)
-    root.mainloop()
-    if result is None:
-        raise SelectionCancelled()
-    return result

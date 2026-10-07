@@ -10,7 +10,7 @@ The existing project virtual environment already has the required packages:
 .venv/bin/python tube_app.py
 ```
 
-You can also run `tube_app.py` in PyCharm with the project's `.venv` interpreter. Running the original `Mutiple_images_analysis.py` entry point opens the same application. OCT7 opens automatically if that folder exists.
+You can also run `tube_app.py` in PyCharm with the project's `.venv` interpreter. OCT7 opens automatically if that folder exists. Use `analyze_tubes.py` for command-line batch processing.
 
 For a new environment (Python 3.10 or newer):
 
@@ -96,7 +96,7 @@ There are no empirical camera multipliers or forced nominal tube heights. The HS
 
 Alignment does not correct perspective, lens distortion or depth differences between tapes and tubes. The images must have the same decoded dimensions, and tapes and tubes should lie in approximately the same plane. Heights are **vertical projections**, not lengths along tilted tubes. For a substantial camera viewpoint change, use a separate setup. Disabling alignment reuses fixed image coordinates. Disabling per-image calibration uses the saved setup sample's scale; use that only when appropriate for your capture geometry.
 
-The supplied OCT7 data contains **173 photos**, **12 tubes in the first photo**, and a camera-position change after the early frames. Some later photos no longer contain the rightmost tube(s). Alignment can recover positions within the photograph but cannot recover missing image content. Small red/brown patches at the tube bases can resemble liquid in empty tubes, so inspect `small_region` flags.
+The OCT7 photographs show **12 tubes in the first photo** and a camera-position change after the early frames. Some later photos no longer contain the rightmost tube(s). Alignment can recover positions within the photograph but cannot recover missing image content. Small red/brown patches at the tube bases can resemble liquid in empty tubes, so inspect `small_region` flags.
 
 ## Command-line batch processing
 
@@ -131,14 +131,27 @@ RUN_GUI_TESTS=1 .venv/bin/python -m unittest discover -s tests -v
 
 The checks cover known synthetic heights, both red hue ranges, noise, clipping, fragmented columns, two-tape disagreement, missing tapes, saved setup validation, reversed selection, zoom transforms, camera translation/scale/rotation, out-of-frame regions, natural file ordering, corrupt files, output protection, cancellation, and native drag/move/resize/undo/sample switching. Synthetic checks establish behavior, not the physical accuracy of experimental photos; compare several real measurements with manual readings before scientific use.
 
-## Project layout
+## Project structure and maintenance
 
-- `tube_app.py`: desktop workflow and background batch progress.
-- `tube_selector.py`: shared Tk canvas, viewport mapping and legacy selection dialogs.
-- `tube_analysis.py`: image I/O, masks, calibration, alignment, measurement, setup persistence and streaming exports.
-- `analyze_tubes.py`: display-independent batch entry point.
-- `tube_plots.py`: CSV loading, scientific PNG/PDF figures and native plot viewer.
-- Original filenames: lightweight compatibility entry points/helpers; the old internal global-state APIs were removed.
-- `tests/`: measurement/workflow and optional native GUI regression checks.
+| Module | Responsibility |
+| --- | --- |
+| `tube_app.py` | Main window, folder/setup workflow, previews and background batch progress. |
+| `tube_dialogs.py` | Validated settings and tube-label drafts; closing an editor discards its draft. |
+| `tube_selector.py` | Native Tk canvas, image/display coordinate mapping, selection and undo history. |
+| `tube_analysis.py` | Shared data models, image processing, calibration, alignment, measurement and CSV export. |
+| `analyze_tubes.py` | Display-independent command-line entry point. |
+| `tube_plots.py` | Detailed CSV loading, shared figure builder, PNG/PDF export and native plot viewer. |
+| `tests/` | Synthetic measurement, export, plotting and optional native GUI checks. |
 
-See [REVIEW.md](REVIEW.md) for the original defects and their resolutions.
+Preview and batch processing use the same `AnalysisSession`. It prepares the sample's reference data, aligns other frames into setup coordinates, and measures included tubes with consistent warning flags. A batch reuses one session; the GUI creates a fresh session after edits. `PreparedFrame` carries the aligned image and its visible footprint. Keep calculation changes in this shared path so preview and exported measurements agree.
+
+`TubeInfo.validate()` and `validate_tubes()` enforce the same identity and label rules in setup files and the editor. `format_height()` controls one-decimal reporting across the table, canvas, annotated images and CSV exports. All functions and classes have docstrings describing their purpose; the more involved measurement functions also document coordinate, missing-data and calibration behavior.
+
+The obsolete compatibility entry points and unused standalone selection dialogs have been removed. Run `tube_app.py` for the desktop workflow and `analyze_tubes.py` for batch processing.
+
+Python formatting follows Black with the settings in `pyproject.toml`. With Black available, format and check the source using:
+
+```sh
+black *.py tests
+black --check *.py tests
+```

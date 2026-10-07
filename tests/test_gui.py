@@ -13,9 +13,14 @@ from tube_analysis import Box, Setup, TubeInfo, run_batch
 from tube_selector import ImageCanvas, Region
 
 
-@unittest.skipUnless(os.environ.get("RUN_GUI_TESTS") == "1", "requires an accessible desktop")
+@unittest.skipUnless(
+    os.environ.get("RUN_GUI_TESTS") == "1", "requires an accessible desktop"
+)
 class NativeSelectionTests(unittest.TestCase):
+    """Exercise real Tk selection gestures, editors, previews and plot windows."""
+
     def setUp(self):
+        """Create isolated fixtures before each regression check."""
         self.root = tk.Tk()
         self.root.geometry("820x620")
         self.boxes = []
@@ -27,9 +32,11 @@ class NativeSelectionTests(unittest.TestCase):
         self.canvas.fit()
 
     def tearDown(self):
+        """Release temporary files or native windows after each regression check."""
         self.root.destroy()
 
     def drag(self, start, end):
+        """Simulate a native drag and verify the live rectangle before release."""
         x1, y1 = self.canvas.transform.to_canvas(*start)
         x2, y2 = self.canvas.transform.to_canvas(*end)
         self.canvas.event_generate("<ButtonPress-1>", x=round(x1), y=round(y1))
@@ -38,25 +45,36 @@ class NativeSelectionTests(unittest.TestCase):
         if self.canvas.mode != "edit":
             draft = self.canvas.find_withtag("draft")
             self.assertTrue(draft, "live drag preview must exist before release")
-            expected = (round(min(x1, x2)), round(min(y1, y2)), round(max(x1, x2)), round(max(y1, y2)))
+            expected = (
+                round(min(x1, x2)),
+                round(min(y1, y2)),
+                round(max(x1, x2)),
+                round(max(y1, y2)),
+            )
             np.testing.assert_allclose(self.canvas.coords(draft[0]), expected, atol=1)
         self.canvas.event_generate("<ButtonRelease-1>", x=round(x2), y=round(y2))
         self.root.update()
 
     def test_live_drag_reverse_direction_zoom_and_resize(self):
+        """Live drag reverse direction zoom and resize."""
         for zoom in (1.0, 1.6):
             self.canvas.zoom(zoom)
             self.drag((1100, 900), (400, 200))
             box = self.boxes[-1]
-            np.testing.assert_allclose((box.x1, box.y1, box.x2, box.y2), (400, 200, 1100, 900), atol=3)
+            np.testing.assert_allclose(
+                (box.x1, box.y1, box.x2, box.y2), (400, 200, 1100, 900), atol=3
+            )
         self.root.geometry("1050x720")
         self.root.update()
         self.canvas.fit()
         self.drag((400, 200), (1100, 900))
         box = self.boxes[-1]
-        np.testing.assert_allclose((box.x1, box.y1, box.x2, box.y2), (400, 200, 1100, 900), atol=3)
+        np.testing.assert_allclose(
+            (box.x1, box.y1, box.x2, box.y2), (400, 200, 1100, 900), atol=3
+        )
 
     def test_move_resize_delete_undo_keep_region_coordinates_synchronized(self):
+        """Move resize delete undo keep region coordinates synchronized."""
         original = Region("tube", Box(300, 200, 600, 800))
         self.canvas.set_regions([original])
         self.canvas.select(0)
@@ -75,6 +93,7 @@ class NativeSelectionTests(unittest.TestCase):
         self.assertEqual(self.canvas.regions[0].box, resized)
 
     def test_app_preview_sample_switch_and_saved_setup(self):
+        """App preview sample switch and saved setup."""
         import tempfile
         from pathlib import Path
         import cv2
@@ -87,7 +106,9 @@ class NativeSelectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
             cv2.imwrite(str(folder / setup.sample_name), image)
-            moved = cv2.warpAffine(image, np.float64([[1, 0, 30], [0, 1, 8]]), (600, 420))
+            moved = cv2.warpAffine(
+                image, np.float64([[1, 0, 30], [0, 1, 8]]), (600, 420)
+            )
             cv2.imwrite(str(folder / "frame2.png"), moved)
             setup.save(folder / "tube_setup.json")
             app.load_folder(folder)
@@ -100,9 +121,12 @@ class NativeSelectionTests(unittest.TestCase):
             self.assertEqual(app.get_setup().sample_name, "frame1.png")
             self.assertEqual(len(app.result_list.get_children()), 3)
             app.save_setup()
-            self.assertEqual(Setup.load(folder / "tube_setup.json").sample_name, "frame1.png")
+            self.assertEqual(
+                Setup.load(folder / "tube_setup.json").sample_name, "frame1.png"
+            )
 
     def test_fixed_calibration_preview_matches_batch_behavior(self):
+        """Fixed calibration preview matches batch behavior."""
         import tempfile
         from pathlib import Path
         import cv2
@@ -129,6 +153,7 @@ class NativeSelectionTests(unittest.TestCase):
             self.assertEqual(first[1], "40.0")
 
     def test_named_subset_preview_sort_undo_and_native_plot_window(self):
+        """Named subset preview sort undo and native plot window."""
         import tempfile
         from pathlib import Path
         import cv2
@@ -147,24 +172,35 @@ class NativeSelectionTests(unittest.TestCase):
             app.load_folder(folder)
             self.root.update()
             self.assertTrue(app.preview())
-            names = [app.result_list.item(row, "values")[0] for row in app.result_list.get_children()]
+            names = [
+                app.result_list.item(row, "values")[0]
+                for row in app.result_list.get_children()
+            ]
             self.assertEqual(names, ["2", "12"])
             app.order_tubes()
-            self.assertEqual([info.number for info in app.get_setup().tube_info], [2, 5, 12])
+            self.assertEqual(
+                [info.number for info in app.get_setup().tube_info], [2, 5, 12]
+            )
             app.canvas.select(2)
             app.delete_region()
             app.undo()
-            self.assertEqual([info.number for info in app.get_setup().tube_info], [2, 5, 12])
-            run_batch([sample], setup, folder / "out", save_previews=False, save_plots=False)
+            self.assertEqual(
+                [info.number for info in app.get_setup().tube_info], [2, 5, 12]
+            )
+            run_batch(
+                [sample], setup, folder / "out", save_previews=False, save_plots=False
+            )
             window = app.show_plots(folder / "out/measurements.csv")
             self.root.update()
             self.assertIn("Tube height plots", window.title())
             window.destroy()
 
     def test_default_custom_label_editor_persistence_csv_and_plot_labels(self):
+        """Default custom label editor persistence CSV and plot labels."""
         import csv
         import tempfile
         from pathlib import Path
+        from unittest.mock import patch
         import cv2
         from tube_app import TubeApp
         from tube_plots import build_figure, load_measurements
@@ -203,23 +239,87 @@ class NativeSelectionTests(unittest.TestCase):
             custom_option.invoke()
             self.assertEqual(custom_name.get(), "Outlet, α")
             bar = body.grid_slaves(row=5, column=0)[0]
-            next(w for w in bar.winfo_children() if w.cget("text") == "Apply").invoke()
+            apply_button = next(
+                w for w in bar.winfo_children() if w.cget("text") == "Apply"
+            )
+            first_id.set("5")  # Duplicates stay invalid even when one tube is excluded.
+            with patch("tube_dialogs.messagebox.showerror") as error:
+                apply_button.invoke()
+                error.assert_called_once()
+            self.assertTrue(dialog.winfo_exists())
+            self.assertEqual([i.number for i in app.get_setup().tube_info], [2, 5, 12])
+            first_id.set("4")
+            apply_button.invoke()
             app.save_setup()
             restored = Setup.load(folder / "tube_setup.json")
-            self.assertEqual([(i.number, i.name, i.enabled, i.use_default_name) for i in restored.tube_info], [(4, "4", True, True), (5, "5", False, True), (11, "Outlet, α", True, False)])
+            self.assertEqual(
+                [
+                    (i.number, i.name, i.enabled, i.use_default_name)
+                    for i in restored.tube_info
+                ],
+                [
+                    (4, "4", True, True),
+                    (5, "5", False, True),
+                    (11, "Outlet, α", True, False),
+                ],
+            )
             app.load_setup(folder / "tube_setup.json")
             self.assertEqual(app.get_setup(), restored)
-            run_batch([sample], restored, folder / "out", save_previews=False, save_plots=False)
-            with (folder / "out/heights.csv").open(newline="", encoding="utf-8") as handle:
-                self.assertEqual(next(csv.reader(handle)), ["image", "4 (cm)", "Outlet, α (cm)"])
+            run_batch(
+                [sample],
+                restored,
+                folder / "out",
+                save_previews=False,
+                save_plots=False,
+            )
+            with (folder / "out/heights.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                self.assertEqual(
+                    next(csv.reader(handle)), ["image", "4 (cm)", "Outlet, α (cm)"]
+                )
             data = load_measurements(folder / "out/measurements.csv")
             figure = build_figure(data)
-            self.assertEqual([t.get_text() for t in figure.axes[0].get_legend().get_texts()], ["4", "Outlet, α"])
+            self.assertEqual(
+                [t.get_text() for t in figure.axes[0].get_legend().get_texts()],
+                ["4", "Outlet, α"],
+            )
             figure.clear()
             dialog = app.edit_tubes()
             body = dialog.winfo_children()[0]
             bar = body.grid_slaves(row=5, column=0)[0]
-            next(w for w in bar.winfo_children() if w.cget("text") == "Use default labels").invoke()
+            next(
+                w
+                for w in bar.winfo_children()
+                if w.cget("text") == "Use default labels"
+            ).invoke()
             self.assertEqual(body.grid_slaves(row=4, column=3)[0].get(), "11")
             next(w for w in bar.winfo_children() if w.cget("text") == "Apply").invoke()
             self.assertTrue(all(i.use_default_name for i in app.get_setup().tube_info))
+
+    def test_settings_editor_validates_drafts_before_applying(self):
+        """Invalid thresholds stay local; valid edits update the shared settings model."""
+        from dataclasses import replace
+        from unittest.mock import patch
+        from tube_app import TubeApp
+
+        self.canvas.destroy()
+        app = TubeApp(self.root)
+        original = replace(app.settings)
+        dialog = app.edit_settings()
+        body = dialog.winfo_children()[0]
+        hue = body.grid_slaves(row=0, column=1)[0]
+        apply_button = body.grid_slaves(row=12, column=0)[0]
+        hue.delete(0, "end")
+        hue.insert(0, "180")
+        with patch("tube_dialogs.messagebox.showerror") as error:
+            apply_button.invoke()
+            error.assert_called_once()
+        self.assertTrue(dialog.winfo_exists())
+        self.assertEqual(app.settings, original)
+        hue.delete(0, "end")
+        hue.insert(0, "12")
+        apply_button.invoke()
+        self.assertFalse(dialog.winfo_exists())
+        self.assertEqual(app.settings.red_hue_max, 12)
+        self.assertTrue(app.dirty)
